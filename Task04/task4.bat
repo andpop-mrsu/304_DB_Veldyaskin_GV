@@ -1,0 +1,47 @@
+#!/bin/bash
+chcp 65001
+
+echo "Инициализация базы данных..."
+sqlite3 movies_rating.db < db_init.sql
+echo "База данных создана успешно!"
+echo " "
+
+echo "1. Пары пользователей, оценивших один и тот же фильм (первые 100)."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "SELECT DISTINCT u1.name AS user1, u2.name AS user2, m.title AS movie_title FROM ratings r1 JOIN ratings r2 ON r1.movieId = r2.movieId AND r1.userId < r2.userId JOIN users u1 ON r1.userId = u1.userId JOIN users u2 ON r2.userId = u2.userId JOIN movies m ON r1.movieId = m.movieId LIMIT 100;"
+echo " "
+
+echo "2. 10 самых свежих оценок от разных пользователей."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "WITH RankedRatings AS (SELECT r.userId, r.movieId, r.rating, r.timestamp, ROW_NUMBER() OVER(PARTITION BY r.userId ORDER BY r.timestamp DESC) as rn FROM ratings r) SELECT m.title, u.name, rr.rating, date(rr.timestamp, 'unixepoch') as review_date FROM RankedRatings rr JOIN users u ON rr.userId = u.userId JOIN movies m ON rr.movieId = m.movieId WHERE rr.rn = 1 ORDER BY rr.timestamp DESC LIMIT 10;"
+echo " "
+
+echo "3. Фильмы с максимальным и минимальным средним рейтингом."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "WITH MovieStats AS (SELECT m.movieId, m.title, CAST(substr(m.title, -5, 4) AS INTEGER) as year, AVG(r.rating) as avg_rating FROM movies m JOIN ratings r ON m.movieId = r.movieId GROUP BY m.movieId), Extremes AS (SELECT MAX(avg_rating) as max_r, MIN(avg_rating) as min_r FROM MovieStats) SELECT ms.title, ms.year, ms.avg_rating, CASE WHEN ms.avg_rating = (SELECT max_r FROM Extremes) THEN 'Да' ELSE 'Нет' END AS 'Рекомендуем' FROM MovieStats ms WHERE ms.avg_rating = (SELECT max_r FROM Extremes) OR ms.avg_rating = (SELECT min_r FROM Extremes) ORDER BY ms.year DESC, ms.title;"
+echo " "
+
+echo "4. Количество и средняя оценка от женщин за 2010-2012 годы."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "SELECT COUNT(r.rating) as rating_count, ROUND(AVG(r.rating), 2) as avg_rating FROM ratings r JOIN users u ON r.userId = u.userId WHERE u.gender = 'female' AND date(r.timestamp, 'unixepoch') BETWEEN '2010-01-01' AND '2012-12-31';"
+echo " "
+
+echo "5. Топ-20 фильмов со средней оценкой и местом в рейтинге."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "WITH MovieRanks AS (SELECT m.title, CAST(substr(m.title, -5, 4) AS INTEGER) as year, ROUND(AVG(r.rating), 2) as avg_rating, RANK() OVER(ORDER BY AVG(r.rating) DESC) as rating_rank FROM movies m JOIN ratings r ON m.movieId = r.movieId GROUP BY m.movieId) SELECT title, year, avg_rating, rating_rank FROM MovieRanks ORDER BY year DESC, title LIMIT 20;"
+echo " "
+
+echo "6. 10 последних зарегистрированных пользователей (Фамилия Имя|Дата)."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "SELECT CASE WHEN instr(name, ' ') > 0 THEN substr(name, instr(name, ' ') + 1) || ' ' || substr(name, 1, instr(name, ' ') - 1) ELSE name END || '|' || reg_date as user_info FROM users ORDER BY reg_date DESC LIMIT 10;"
+echo " "
+
+echo "7. Таблица умножения (рекурсивный CTE)."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 100) SELECT ((x - 1) / 10 + 1) || 'x' || (((x - 1) % 10) + 1) || '=' || (((x - 1) / 10 + 1) * (((x - 1) % 10) + 1)) FROM cnt;"
+echo " "
+
+echo "8. Все уникальные жанры фильмов (рекурсивный CTE)."
+echo --------------------------------------------------
+sqlite3 movies_rating.db -box -echo "WITH RECURSIVE split(movieId, genres, genre, rest) AS (SELECT movieId, genres, CASE WHEN instr(genres, '|') > 0 THEN substr(genres, 1, instr(genres, '|') - 1) ELSE genres END, CASE WHEN instr(genres, '|') > 0 THEN substr(genres, instr(genres, '|') + 1) ELSE '' END FROM movies UNION ALL SELECT movieId, genres, CASE WHEN instr(rest, '|') > 0 THEN substr(rest, 1, instr(rest, '|') - 1) ELSE rest END, CASE WHEN instr(rest, '|') > 0 THEN substr(rest, instr(rest, '|') + 1) ELSE '' END FROM split WHERE rest != '') SELECT DISTINCT genre FROM split WHERE genre != '' ORDER BY genre;"
+echo " "
